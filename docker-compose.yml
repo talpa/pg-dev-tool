@@ -1,0 +1,85 @@
+version: '3.6'
+services:
+  postgres:
+    image: "postgres:14"
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "5432:5432"
+    networks:
+      - default
+  dbmate:
+    image: amacneil/dbmate
+    restart: always
+    command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done;'
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: "postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB}?sslmode=disable"
+    volumes:
+      - ./db:/db
+    networks:
+      - default
+  dbmate_orig:
+    image: amacneil/dbmate:latest
+    restart: always
+    env_file:
+      - remote.env
+    volumes:
+      - ./db/migrations:/db
+    networks:
+      - default
+  pgtap:
+    image: hbpmip/pgtap:latest
+    security_opt:
+      - seccomp:unconfined
+    restart: always
+    command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done;'
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    environment:
+      DATABASE: ${DB}
+      HOST: postgres
+      USER: ${DB_USER}
+      PASSWORD: ${DB_PASSWORD}
+      TESTS: ${TESTS}
+    volumes:
+      - ./tests/:/test/
+    depends_on:
+      - postgres
+    networks:
+      - default
+  restapi:
+    image: postgrest/postgrest
+    ports:
+      - "3000:3000"
+    environment:
+      PGRST_DB_URI: postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB}
+      PGRST_DB_SCHEMA: sdm
+      PGRST_DB_ANON_ROLE: web_anon #In production this role should not be the same as the one used for the connection
+      PGRST_OPENAPI_SERVER_PROXY_URI: http://127.0.0.1:3000
+    depends_on:
+      - postgres
+  swagger:
+    image: swaggerapi/swagger-ui
+    ports:
+      - "8080:8080"
+    expose:
+      - "8080"
+    environment:
+      API_URL: http://localhost:3000/
+    depends_on:
+      - restapi
+networks:
+  default:
+    driver: bridge
+
